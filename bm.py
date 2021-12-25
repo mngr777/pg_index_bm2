@@ -11,7 +11,7 @@ import knn
 gVerbose = False
 
 ColumnDefault = 'geom'
-TimesDefault = 1
+TimesDefault = 10
 
 def vprint(*args, **kwargs):
     if (gVerbose): print(*args, **kwargs)
@@ -84,6 +84,7 @@ ORDER BY {} <-> ST_SetSRID(ST_Point(%s, %s), %s) LIMIT %s
         (point[0], point[1], args.srid, k))
     return pg.get_exec_time_ms(cursor)
 
+# Load points from args.knn_points file, run kNN args.times times for each point
 def test_knn(conn, args, k):
     # Create index
     index_name = get_index_name(args.table, args.column)
