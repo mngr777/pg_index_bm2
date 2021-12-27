@@ -68,9 +68,7 @@ ORDER BY {} <-> ST_SetSRID(ST_Point(%s, %s), %s) LIMIT %s
         (point[0], point[1], srid, args.neighbour_num))
     return [t[0] for t in cursor.fetchall()]
 
-def run(conn_data, args):
-    # Connect
-    conn = pg.Connection(conn_data['params'], conn_data['name'])
+def run(conn, args):
     # Get SRID
     srid = get_srid(conn, args)
     # Generate random points
@@ -95,7 +93,7 @@ def main():
     # Find connection by name and run
     for conn_data in config['connections']:
         if conn_data['name'] == args.connection:
-            run(conn_data, args)
+            run(pg.Connection(conn_data['params'], conn_data['name']), args)
             return
     print('Connection name "{}" not found'.format(args.connection))
 
