@@ -241,6 +241,7 @@ def init(conn, args):
             reconnect = True
         else:
             print('Table "{}" already exists and is not empty, data will not be imported'.format(args.table))
+            print() # newline
 
     if reconnect:
         # Reconnect
@@ -254,6 +255,8 @@ def cleanup(conn, args):
         drop_table(conn, args.table)
 
 def run(conn_data, args):
+    print('Connection: "{}"'.format(conn_data['name']))
+
     # Connect
     vprint('Connecting to "{}"'.format(conn_data['name']))
     conn = pg.Connection(conn_data['params'], conn_data['name'])
