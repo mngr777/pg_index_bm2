@@ -1,0 +1,6 @@
+{
+    "connections": [
+        {"name": "default", "params": {"host": "127.0.0.1", "port": "5432", "dbname": "test", "user": "postgres", "password": "password1"}}
+        {"name": "patched", "params": {"host": "127.0.0.1", "port": "5433", "dbname": "test", "user": "postgres", "password": "password1"}}
+    ]
+}
