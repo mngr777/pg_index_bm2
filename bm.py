@@ -105,7 +105,6 @@ def test_create_gist_index(conn, args):
     print('gist_stat({}):'.format(index_name))
     print(gist_index_stat(conn, index_name))
 
-
 def test_self_join_request(conn, args):
     table_ident = Sql.Identifier(args.table)
     column_ident = Sql.Identifier(args.column)
@@ -263,6 +262,7 @@ def cleanup(conn, args):
 
 def run(conn_data, args):
     print('Connection: "{}"'.format(conn_data['name']))
+    print() # newline
 
     # Connect
     vprint('Connecting to "{}"'.format(conn_data['name']))

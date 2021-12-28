@@ -3,6 +3,7 @@ import psycopg2
 def connect(params):
     connection = psycopg2.connect(**params)
     connection.autocommit = True
+    connection.set_client_encoding('UTF8')
     return connection
 
 class Connection:
