@@ -22,7 +22,7 @@ def time_ms_round(value):
 
 def create_table(conn, name, columns):
     ident = Sql.Identifier(name)
-    query = 'CREATE TABLE {} (' + columns + ')'
+    query = 'CREATE TABLE IF NOT EXISTS {} (' + columns + ')'
     conn.execute(Sql.SQL(query).format(ident))
 
 def drop_table(conn, name):
