@@ -6,7 +6,7 @@ BELARUS_SHP_ARCHIVE_URL="https://download.geofabrik.de/europe/${BELARUS_SHP_ARCH
 BELARUS_BUILDINGS_SHP_FILE="gis_osm_buildings_a_free_1.shp"
 BELARUS_BUILDINGS_SQL_TABLE="test_belarus_buildings"
 BELARUS_BUILDINGS_SQL_FILE="${BELARUS_BUILDINGS_SQL_TABLE}.sql"
-BELARUS_DATA_SRID="37201"
+BELARUS_DATA_SRID="4326" # WGS_1984
 
 # Unzip roads_rdr dump
 if [ ! -f ./roads_rdr_insert.sql ]; then
