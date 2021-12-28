@@ -54,6 +54,10 @@ def create_gist_index(conn, table, index, column, fillfactor=None):
         params = (fillfactor,)
     conn.execute(Sql.SQL(query).format(index_ident, table_ident, column_ident), params)
 
+def gist_index_stat(conn, name):
+    cursor = conn.execute(Sql.SQL('SELECT gist_stat(%s)'), (name,))
+    return cursor.fetchone()[0]
+
 def drop_index(conn, name):
     ident = Sql.Identifier(name)
     conn.execute(Sql.SQL('DROP INDEX IF EXISTS {}').format(ident))
@@ -97,6 +101,9 @@ def test_create_gist_index(conn, args):
         time_ms_round(mean(create_times_ms)),
         time_ms_round(median(create_times_ms))))
     print() # newline
+    # Print gist_stat result
+    print('gist_stat({}):'.format(index_name))
+    print(gist_index_stat(conn, index_name))
 
 
 def test_self_join_request(conn, args):

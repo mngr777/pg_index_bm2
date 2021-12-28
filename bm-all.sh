@@ -9,7 +9,7 @@ echo "# Roads around Vancouver"
         --tiles "data/roads_rdr/tiles.txt" \
         --srid 3005 \
         --fillfactor 20 \
-        --times 1
+        --times 10
 
 # OSM Belarus
 declare -a belarus_items=('buildings')
@@ -22,6 +22,6 @@ for item in "${belarus_items[@]}"; do
             --tiles "data/test_belarus/tiles.txt" \
             --srid 4326 \
             --fillfactor 20 \
-            --times 1
+            --times 10
 done
 
