@@ -1,7 +1,6 @@
 .#*
 __pycache__
 config.json
-knn.txt
 data/roads_rdr_insert.sql
 data/test_belarus_buildings.sql
 data/geofabrik/*
