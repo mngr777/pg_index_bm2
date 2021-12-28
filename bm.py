@@ -25,6 +25,17 @@ def create_table(conn, name, columns):
     query = 'CREATE TABLE IF NOT EXISTS {} (' + columns + ')'
     conn.execute(Sql.SQL(query).format(ident))
 
+def table_exists(conn, name):
+    # TODO: check schema
+    query = 'SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name=%s)'
+    cursor = conn.execute(Sql.SQL(query), (name,))
+    return cursor.fetchone()[0]
+
+def table_is_empty(conn, name):
+    ident = Sql.Identifier(name)
+    cursor = conn.execute(Sql.SQL('SELECT COUNT(*) FROM {}').format(ident))
+    return cursor.fetchone()[0] == 0
+
 def drop_table(conn, name):
     ident = Sql.Identifier(name)
     conn.execute(Sql.SQL('DROP TABLE IF EXISTS {}').format(ident))
@@ -75,9 +86,11 @@ def test_create_gist_index(conn, args):
         # Drop index
         drop_index(conn, index_name)
         # Create index, measure time to complete
+        vprint('  #{}'.format(i), end=' ')
         ts = datetime.datetime.now()
         create_gist_index(conn, args.table, index_name, args.column, args.fillfactor)
         time_ms = (datetime.datetime.now() - ts).total_seconds() * 1000
+        vprint('{} ms'.format(time_ms_round(time_ms)))
         create_times_ms.append(time_ms)
     # Print results
     print('mean: {} ms, median: {} ms'.format(
@@ -105,7 +118,7 @@ def test_self_join(conn, args):
     for i in range(1, args.times + 1):
         vprint('  #{}'.format(i), end=' ')
         time_ms = test_self_join_request(conn, args)
-        vprint('{} ms'.format(time_ms))
+        vprint('{} ms'.format(time_ms_round(time_ms)))
         exec_times_ms.append(time_ms)
 
     # Print results
@@ -222,9 +235,12 @@ def init(conn, args):
 
     # Import test data
     if args.data:
-        vprint('Importing data from "{}"'.format(args.data))
-        conn.run(args.data)
-        reconnect = True
+        if not table_exists(conn, args.table) or table_is_empty(conn, args.table):
+            vprint('Importing data from "{}"'.format(args.data))
+            conn.run(args.data)
+            reconnect = True
+        else:
+            print('Table "{}" already exists and is not empty, data will not be imported'.format(args.table))
 
     if reconnect:
         # Reconnect
