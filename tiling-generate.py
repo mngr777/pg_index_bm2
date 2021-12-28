@@ -24,6 +24,7 @@ def parse_args():
     parser.add_argument('--column', default=ColumnDefault, help='Geometry column')
     parser.add_argument('--zoom-start', type=int, default=1, help='Zoom level start value for --num')
     parser.add_argument('--num', action=NumSplit, default=NumDefault, help='# of points for each zoom level starting from 1, comma-separated')
+    parser.add_argument('--add-count', action='store_true', default=False, help='Append # of objects')
     parser.add_argument('--random-seed', type=int, default=RandomSeedDefault, help='Random seed')
     return parser.parse_args()
 
@@ -87,8 +88,10 @@ def run(conn, args):
 
     # Generate tiles
     for tile in get_tiles(conn, args, box):
-        num = count_tile_objects(conn, args, srid, tile)
-        line = tiling.tile_to_string(tile) + ';' + str(num)
+        line = tiling.tile_to_string(tile)
+        if args.add_count:
+            num = count_tile_objects(conn, args, srid, tile)
+            line += (';' + str(num))
         print(line)
 
 
