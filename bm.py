@@ -6,8 +6,8 @@ from statistics import mean, median
 from psycopg2 import sql as Sql
 import cfg
 import pg
-import knn
-import tiling
+
+MercatorSize = 20037508.3427892 * 2
 
 gVerbose = False
 
@@ -70,8 +70,6 @@ def parse_args():
     parser.add_argument('--column', default=ColumnDefault, help='Geometry column')
     parser.add_argument('--fillfactor', default=None, help='GiST index FILLFACTOR')
     parser.add_argument('--srid', type=int, default=0, help='Geometry SRID')
-    parser.add_argument('--knn-points', help='kNN point list')
-    parser.add_argument('--tiles', help='Tile list')
     parser.add_argument('--drop-table-before', action='store_true', default=False, help='Drop table before data import')
     parser.add_argument('--drop-table-after', action='store_true', default=False, help='Drop after running tests')
     parser.add_argument('--create-table', action='store_true', default=False, help='Create table before data import')
@@ -80,10 +78,30 @@ def parse_args():
     parser.add_argument('--verbose', action='store_true', default=False, help='Print log messages')
     return parser.parse_args()
 
+def get_zoom_level(conn, args):
+    table_ident = Sql.Identifier(args.table)
+    column_ident = Sql.Identifier(args.column)
+    query = '''
+WITH
+  extent AS (SELECT ST_Transform(ST_SetSRID(ST_Extent({}), %s), 3857) AS geom FROM {}),
+  size AS (
+    SELECT GREATEST(
+      ST_XMax(extent.geom) - ST_XMin(extent.geom),
+      ST_YMax(extent.geom) - ST_YMin(extent.geom)
+    ) / 10 AS value
+    FROM extent)
+SELECT ROUND(LOG(%s / size.value) / LOG(2.0)) AS zoom
+FROM size
+'''
+    cursor = conn.execute(
+        Sql.SQL(query).format(column_ident, table_ident),
+        (args.srid, MercatorSize))
+    return cursor.fetchone()[0]
+
 # Create GiST index on column, return creation time (including latency) in ms
 def test_create_gist_index(conn, args):
     fillfactor_text = ' FILLFACTOR {}'.format(args.fillfactor) if args.fillfactor is not None else ''
-    print('CREATE GiST INDEX{}, {} time(s)'.format(fillfactor_text, args.times))
+    print('CREATE GiST INDEX{}, {} times'.format(fillfactor_text, args.times))
     index_name = get_index_name(args.table, args.column)
     create_times_ms = []
     for i in range(1, args.times + 1):
@@ -119,7 +137,7 @@ def test_self_join(conn, args):
     create_gist_index(conn, args.table, index_name, args.column, args.fillfactor)
 
     # Run self-join query args.times times
-    print('Self-join, {} time(s)'.format(args.times))
+    print('Self-join, {} times'.format(args.times))
     exec_times_ms = []
     for i in range(1, args.times + 1):
         vprint('  #{}'.format(i), end=' ')
@@ -133,90 +151,90 @@ def test_self_join(conn, args):
         time_ms_round(median(exec_times_ms))))
     print() # newline
 
-def test_tiling_request(conn, args, tile):
+def test_tiling_request(conn, args, zoom):
     table_ident = Sql.Identifier(args.table)
     column_ident = Sql.Identifier(args.column)
-    env = tiling.tile_to_envelope_3857(tile)
     query = '''
 EXPLAIN (ANALYZE, FORMAT JSON)
-SELECT {}
-FROM {}
-WHERE ST_Intersects({}, ST_Transform(ST_MakeEnvelope(%s, %s, %s, %s, 3857), %s))
+SELECT tile.i, tile.j, objects.geom
+FROM (
+  SELECT (
+    ST_SquareGrid(
+      %s,
+      (SELECT ST_Transform(ST_SetSRID(ST_Extent({}), %s), 3857) FROM {}))
+  ).*
+) tile
+JOIN LATERAL (
+  SELECT {} AS geom FROM {} WHERE ST_Intersects({}, ST_Transform(tile.geom, %s))
+) objects
+ON true
 '''
     cursor = conn.execute(
-        Sql.SQL(query).format(column_ident, table_ident, column_ident),
-        (env[0], env[1], env[2], env[3], args.srid))
+        Sql.SQL(query).format(column_ident, table_ident, column_ident, table_ident, column_ident),
+        (MercatorSize / 2**zoom, args.srid, args.srid))
     return pg.get_exec_time_ms(cursor)
 
-def test_tiling(conn, args):
+def test_tiling(conn, args, zoom):
     # Create index
     index_name = get_index_name(args.table, args.column)
     drop_index(conn, index_name)
     create_gist_index(conn, args.table, index_name, args.column, args.fillfactor)
 
-    # Read tile list
-    lines = tiling.load_data(args.tiles)
-    print('Tiling, {} tiles, {} time(s) per tile'.format(len(lines), args.times))
+    # Run tiling request args.times times
+    print('Tiling, zoom level {}, {} times'.format(zoom, args.times))
     exec_times_ms = []
-    for linum in range(0, len(lines)):
-        # Get tile
-        line = lines[linum]
-        tile = line[0]
-        vprint('  tile:', tiling.tile_to_string(tile), end=', ')
-        # Run query args.times times
-        tile_exec_times_ms = []
-        for i in range(1, args.times + 1):
-            time_ms = test_tiling_request(conn, args, tile)
-            tile_exec_times_ms.append(time_ms)
-        exec_times_ms.extend(tile_exec_times_ms) # add tile query exec times
-        if gVerbose:
-            vprint('mean: {} ms, median: {} ms'.format(
-                time_ms_round(mean(tile_exec_times_ms)),
-                time_ms_round(median(tile_exec_times_ms))))
-
+    for i in range(1, args.times + 1):
+        vprint('  #{}'.format(i), end=' ')
+        time_ms = test_tiling_request(conn, args, zoom)
+        vprint('{} ms'.format(time_ms))
+        exec_times_ms.append(time_ms)
     # Pring results
     print('mean: {} ms, median: {} ms'.format(
         time_ms_round(mean(exec_times_ms)),
         time_ms_round(median(exec_times_ms))))
     print() # newline
 
-def test_knn_request(conn, args, point, k):
+def test_knn_request(conn, args, k, zoom):
     table_ident = Sql.Identifier(args.table)
     column_ident = Sql.Identifier(args.column)
     query = '''
-EXPLAIN (ANALYZE, FORMAT JSON) SELECT {} FROM {}
-ORDER BY {} <-> ST_SetSRID(ST_Point(%s, %s), %s) LIMIT %s
+EXPLAIN (ANALYZE, FORMAT JSON)
+SELECT tile.i, tile.j, objects.geom
+FROM (
+  SELECT (
+    ST_SquareGrid(
+      %s,
+      (SELECT ST_Transform(ST_SetSRID(ST_Extent({}), %s), 3857) FROM {}))
+  ).*
+) tile
+JOIN LATERAL (
+  SELECT {} AS geom
+  FROM {}
+  ORDER BY {} <-> ST_Centroid(ST_Transform(tile.geom, %s))
+  LIMIT %s
+) objects
+ON true
 '''
     cursor = conn.execute(
-        Sql.SQL(query).format(column_ident, table_ident, column_ident),
-        (point[0], point[1], args.srid, k))
+        Sql.SQL(query).format(column_ident, table_ident, column_ident, table_ident, column_ident),
+        (MercatorSize / 2**zoom, args.srid, args.srid, k))
     return pg.get_exec_time_ms(cursor)
 
 # Load points from args.knn_points file, run kNN args.times times for each point
-def test_knn(conn, args, k):
+def test_knn(conn, args, k, zoom):
     # Create index
     index_name = get_index_name(args.table, args.column)
     drop_index(conn, index_name)
     create_gist_index(conn, args.table, index_name, args.column, args.fillfactor)
 
-    # Read point list
-    lines = knn.load_data(args.knn_points)
-    print('kNN, k={}, {} points, {} time(s) per point'.format(k, len(lines), args.times))
+    # Run kNN request args.times times
+    print('kNN, k={}, {} times per point'.format(k, args.times))
     exec_times_ms = []
-    for linum in range(0, len(lines)):
-        line = lines[linum]
-        point = line[0]
-        vprint('  point:', knn.point_to_string(point), end=', ')
-        # Run query args.times times
-        point_exec_times_ms = []
-        for i in range(1, args.times + 1):
-            time_ms = test_knn_request(conn, args, point, k)
-            point_exec_times_ms.append(time_ms)
-        exec_times_ms.extend(point_exec_times_ms) # add point query exec times
-        if gVerbose:
-            vprint('mean: {} ms, median: {} ms'.format(
-                time_ms_round(mean(point_exec_times_ms)),
-                time_ms_round(median(point_exec_times_ms))))
+    for i in range(1, args.times + 1):
+        vprint('  #{}'.format(i), end=' ')
+        time_ms = test_knn_request(conn, args, k, zoom)
+        vprint('{} ms'.format(time_ms))
+        exec_times_ms.append(time_ms)
 
     # Print results
     print('mean: {} ms, median: {} ms'.format(
@@ -272,6 +290,9 @@ def run(conn_data, args):
     init(conn, args)
     vprint() # newline
 
+    # Get zoom level for tiling/kNN tests
+    zoom = get_zoom_level(conn, args)
+
     ## Run tests
 
     # 1. GiST index creation time
@@ -281,13 +302,11 @@ def run(conn_data, args):
     test_self_join(conn, args)
 
     # 3. Tiling
-    if args.tiles:
-        test_tiling(conn, args)
+    test_tiling(conn, args, zoom)
 
     # 4. kNN request time, k in {1, 100}
-    if args.knn_points:
-        test_knn(conn, args, 1)
-        test_knn(conn, args, 100)
+    test_knn(conn, args, 1, zoom)
+    test_knn(conn, args, 100, zoom)
 
     # Cleanup
     cleanup(conn, args)
