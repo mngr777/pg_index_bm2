@@ -22,8 +22,16 @@ def vprint(*args, **kwargs):
 def time_ms_round(value):
     return round(value, 4)
 
+def bytes_to_str(value):
+    return value.decode('utf-8')
+
 def get_index_name(table, column):
     return '{}_{}_idx'.format(table, column)
+
+def print_query(cursor):
+    print('--------------------')
+    print(bytes_to_str(cursor.query))
+    print('--------------------')
 
 def create_gist_index(conn, table, index, column, fillfactor=None):
     table_ident = Sql.Identifier(table)
@@ -34,7 +42,7 @@ def create_gist_index(conn, table, index, column, fillfactor=None):
     if fillfactor is not None:
         query += ' WITH (fillfactor = %s)'
         params = (fillfactor,)
-    conn.execute(Sql.SQL(query).format(index_ident, table_ident, column_ident), params)
+    return conn.execute(Sql.SQL(query).format(index_ident, table_ident, column_ident), params)
 
 def gist_index_stat(conn, name):
     cursor = conn.execute(Sql.SQL('SELECT gist_stat(%s)'), (name,))
@@ -59,15 +67,13 @@ def parse_args():
 def get_tile_num(conn, args):
     table_ident = Sql.Identifier(args.table)
     column_ident = Sql.Identifier(args.column)
-    query = '''
-SELECT COUNT(*) FROM (
+    query = '''SELECT COUNT(*) FROM (
   SELECT (
     ST_SquareGrid(
       %s,
       (SELECT ST_Transform(ST_SetSRID(ST_Extent({}), %s), 3857) FROM {}))
   ).*
-) tiles
-'''
+) tiles'''
     cursor = conn.execute(
         Sql.SQL(query).format(column_ident, table_ident),
         (MercatorSize / 2**args.zoom, args.srid))
@@ -83,11 +89,15 @@ def test_create_gist_index(conn, args):
         # Drop index
         drop_index(conn, index_name)
         # Create index, measure time to complete
-        vprint('  #{}'.format(i), end=' ')
         ts = datetime.datetime.now()
-        create_gist_index(conn, args.table, index_name, args.column, args.fillfactor)
+        cursor = create_gist_index(conn, args.table, index_name, args.column, args.fillfactor)
         time_ms = (datetime.datetime.now() - ts).total_seconds() * 1000
-        vprint('{} ms'.format(time_ms_round(time_ms)))
+        # Print query first time
+        if (i == 1):
+            print_query(cursor)
+        # Print result
+        vprint('  #{} {} ms'.format(i, time_ms_round(time_ms)))
+        # Store result
         create_times_ms.append(time_ms)
     # Print results
     print('mean: {} ms, median: {} ms'.format(
@@ -102,8 +112,7 @@ def test_self_join_request(conn, args):
     table_ident = Sql.Identifier(args.table)
     column_ident = Sql.Identifier(args.column)
     query = 'EXPLAIN (ANALYZE, FORMAT JSON) SELECT COUNT(*) FROM {} a, {} b WHERE a.{} && b.{}'
-    cursor = conn.execute(Sql.SQL(query).format(table_ident, table_ident, column_ident, column_ident))
-    return pg.get_exec_time_ms(cursor)
+    return conn.execute(Sql.SQL(query).format(table_ident, table_ident, column_ident, column_ident))
 
 def test_self_join(conn, args):
     # Create index
@@ -115,9 +124,15 @@ def test_self_join(conn, args):
     print('Self-join, {} times'.format(args.times))
     exec_times_ms = []
     for i in range(1, args.times + 1):
-        vprint('  #{}'.format(i), end=' ')
-        time_ms = test_self_join_request(conn, args)
-        vprint('{} ms'.format(time_ms_round(time_ms)))
+        # Run test query
+        cursor = test_self_join_request(conn, args)
+        time_ms = pg.get_exec_time_ms(cursor)
+        # Print query first time
+        if (i == 1):
+            print_query(cursor)
+        # Print result
+        vprint('  #{} {} ms'.format(i, time_ms_round(time_ms)))
+        # Store result
         exec_times_ms.append(time_ms)
 
     # Print results
@@ -129,8 +144,7 @@ def test_self_join(conn, args):
 def test_tiling_request(conn, args):
     table_ident = Sql.Identifier(args.table)
     column_ident = Sql.Identifier(args.column)
-    query = '''
-EXPLAIN (ANALYZE, FORMAT JSON)
+    query = '''EXPLAIN (ANALYZE, FORMAT JSON)
 SELECT tile.i, tile.j, objects.geom
 FROM (
   SELECT (
@@ -142,12 +156,10 @@ FROM (
 JOIN LATERAL (
   SELECT {} AS geom FROM {} WHERE ST_Intersects({}, ST_Transform(tile.geom, %s))
 ) objects
-ON true
-'''
-    cursor = conn.execute(
+ON true'''
+    return conn.execute(
         Sql.SQL(query).format(column_ident, table_ident, column_ident, table_ident, column_ident),
         (MercatorSize / 2**args.zoom, args.srid, args.srid))
-    return pg.get_exec_time_ms(cursor)
 
 def test_tiling(conn, args, tile_num):
     # Create index
@@ -159,9 +171,15 @@ def test_tiling(conn, args, tile_num):
     print('Tiling, zoom level {}, {} tiles, {} times'.format(args.zoom, tile_num, args.times))
     exec_times_ms = []
     for i in range(1, args.times + 1):
-        vprint('  #{}'.format(i), end=' ')
-        time_ms = test_tiling_request(conn, args)
-        vprint('{} ms'.format(time_ms))
+        # Run test query
+        cursor = test_tiling_request(conn, args)
+        time_ms = pg.get_exec_time_ms(cursor)
+        # Print query first time
+        if (i == 1):
+            print_query(cursor)
+        # Print result
+        vprint('  #{} {} ms'.format(i, time_ms))
+        # Store result
         exec_times_ms.append(time_ms)
     # Pring results
     print('mean: {} ms, median: {} ms'.format(
@@ -172,8 +190,7 @@ def test_tiling(conn, args, tile_num):
 def test_knn_request(conn, args, k):
     table_ident = Sql.Identifier(args.table)
     column_ident = Sql.Identifier(args.column)
-    query = '''
-EXPLAIN (ANALYZE, FORMAT JSON)
+    query = '''EXPLAIN (ANALYZE, FORMAT JSON)
 SELECT tile.i, tile.j, objects.geom
 FROM (
   SELECT (
@@ -188,12 +205,10 @@ JOIN LATERAL (
   ORDER BY {} <-> ST_Centroid(ST_Transform(tile.geom, %s))
   LIMIT %s
 ) objects
-ON true
-'''
-    cursor = conn.execute(
+ON true'''
+    return conn.execute(
         Sql.SQL(query).format(column_ident, table_ident, column_ident, table_ident, column_ident),
         (MercatorSize / 2**args.zoom, args.srid, args.srid, k))
-    return pg.get_exec_time_ms(cursor)
 
 # Load points from args.knn_points file, run kNN args.times times for each point
 def test_knn(conn, args, k, tile_num):
@@ -206,9 +221,15 @@ def test_knn(conn, args, k, tile_num):
     print('kNN, k={}, zoom level {}, {} tiles, {} times'.format(k, args.zoom, tile_num, args.times))
     exec_times_ms = []
     for i in range(1, args.times + 1):
-        vprint('  #{}'.format(i), end=' ')
-        time_ms = test_knn_request(conn, args, k)
-        vprint('{} ms'.format(time_ms))
+        # Run test query
+        cursor = test_knn_request(conn, args, k)
+        time_ms = pg.get_exec_time_ms(cursor)
+        # Print query first time
+        if (i == 1):
+            print_query(cursor)
+        # Print result
+        vprint('  #{} {} ms'.format(i, time_ms))
+        # Store result
         exec_times_ms.append(time_ms)
 
     # Print results
@@ -222,7 +243,6 @@ def run(conn_data, args):
     print() # newline
 
     # Connect
-    vprint('Connecting to "{}"'.format(conn_data['name']))
     conn = pg.Connection(conn_data['params'], conn_data['name'])
 
     ## Run tests

@@ -1,8 +1,11 @@
 # Roads around Vancouver
 Connection: "orig"
 
-CREATE GiST INDEX, 10 times
-mean: 254.6159 ms, median: 253.5225 ms
+CREATE GiST INDEX, 3 times
+--------------------
+CREATE INDEX "roads_rdr_geom_idx" ON "roads_rdr" USING GIST("geom")
+--------------------
+mean: 244.3963 ms, median: 239.047 ms
 
 gist_stat(roads_rdr_geom_idx):
 Number of levels:          3
@@ -15,23 +18,80 @@ Total size of tuples:      5218428 bytes
 Total size of leaf tuples: 5198388 bytes
 Total size of index:       5857280 bytes
 
-Self-join, 10 times
-mean: 15239.0256 ms, median: 15035.5435 ms
+Self-join, 3 times
+--------------------
+EXPLAIN (ANALYZE, FORMAT JSON) SELECT COUNT(*) FROM "roads_rdr" a, "roads_rdr" b WHERE a."geom" && b."geom"
+--------------------
+mean: 14901.8313 ms, median: 14976.219 ms
 
-Tiling, zoom level 14, 2296 tiles, 10 times
-mean: 10173.678 ms, median: 10061.5725 ms
+Tiling, zoom level 14, 2296 tiles, 3 times
+--------------------
+EXPLAIN (ANALYZE, FORMAT JSON)
+SELECT tile.i, tile.j, objects.geom
+FROM (
+  SELECT (
+    ST_SquareGrid(
+      2445.9849051256347,
+      (SELECT ST_Transform(ST_SetSRID(ST_Extent("geom"), 3005), 3857) FROM "roads_rdr"))
+  ).*
+) tile
+JOIN LATERAL (
+  SELECT "geom" AS geom FROM "roads_rdr" WHERE ST_Intersects("geom", ST_Transform(tile.geom, 3005))
+) objects
+ON true
+--------------------
+mean: 9507.5257 ms, median: 9522.756 ms
 
-kNN, k=1, zoom level 14, 2296 tiles, 10 times
-mean: 1337.7524 ms, median: 1337.449 ms
+kNN, k=1, zoom level 14, 2296 tiles, 3 times
+--------------------
+EXPLAIN (ANALYZE, FORMAT JSON)
+SELECT tile.i, tile.j, objects.geom
+FROM (
+  SELECT (
+    ST_SquareGrid(
+      2445.9849051256347,
+      (SELECT ST_Transform(ST_SetSRID(ST_Extent("geom"), 3005), 3857) FROM "roads_rdr"))
+  ).*
+) tile
+JOIN LATERAL (
+  SELECT "geom" AS geom
+  FROM "roads_rdr"
+  ORDER BY "geom" <-> ST_Centroid(ST_Transform(tile.geom, 3005))
+  LIMIT 1
+) objects
+ON true
+--------------------
+mean: 1274.3497 ms, median: 1275.28 ms
 
-kNN, k=100, zoom level 14, 2296 tiles, 10 times
-mean: 6983.5279 ms, median: 7199.777 ms
+kNN, k=100, zoom level 14, 2296 tiles, 3 times
+--------------------
+EXPLAIN (ANALYZE, FORMAT JSON)
+SELECT tile.i, tile.j, objects.geom
+FROM (
+  SELECT (
+    ST_SquareGrid(
+      2445.9849051256347,
+      (SELECT ST_Transform(ST_SetSRID(ST_Extent("geom"), 3005), 3857) FROM "roads_rdr"))
+  ).*
+) tile
+JOIN LATERAL (
+  SELECT "geom" AS geom
+  FROM "roads_rdr"
+  ORDER BY "geom" <-> ST_Centroid(ST_Transform(tile.geom, 3005))
+  LIMIT 100
+) objects
+ON true
+--------------------
+mean: 6592.1957 ms, median: 6585.457 ms
 
 # OSM Belarus
 Connection: "orig"
 
 CREATE GiST INDEX, 1 times
-mean: 13516.69 ms, median: 13516.69 ms
+--------------------
+CREATE INDEX "test_belarus_geom_idx" ON "test_belarus" USING GIST("geom")
+--------------------
+mean: 13810.323 ms, median: 13810.323 ms
 
 gist_stat(test_belarus_geom_idx):
 Number of levels:          3
@@ -45,13 +105,67 @@ Total size of leaf tuples: 225877032 bytes
 Total size of index:       253771776 bytes
 
 Self-join, 1 times
-mean: 2308334.542 ms, median: 2308334.542 ms
+--------------------
+EXPLAIN (ANALYZE, FORMAT JSON) SELECT COUNT(*) FROM "test_belarus" a, "test_belarus" b WHERE a."geom" && b."geom"
+--------------------
+mean: 2352973.406 ms, median: 2352973.406 ms
 
 Tiling, zoom level 11, 4032 tiles, 1 times
-mean: 121905.012 ms, median: 121905.012 ms
+--------------------
+EXPLAIN (ANALYZE, FORMAT JSON)
+SELECT tile.i, tile.j, objects.geom
+FROM (
+  SELECT (
+    ST_SquareGrid(
+      19567.879241005077,
+      (SELECT ST_Transform(ST_SetSRID(ST_Extent("geom"), 4326), 3857) FROM "test_belarus"))
+  ).*
+) tile
+JOIN LATERAL (
+  SELECT "geom" AS geom FROM "test_belarus" WHERE ST_Intersects("geom", ST_Transform(tile.geom, 4326))
+) objects
+ON true
+--------------------
+mean: 119638.322 ms, median: 119638.322 ms
 
 kNN, k=1, zoom level 11, 4032 tiles, 1 times
-mean: 25933.088 ms, median: 25933.088 ms
+--------------------
+EXPLAIN (ANALYZE, FORMAT JSON)
+SELECT tile.i, tile.j, objects.geom
+FROM (
+  SELECT (
+    ST_SquareGrid(
+      19567.879241005077,
+      (SELECT ST_Transform(ST_SetSRID(ST_Extent("geom"), 4326), 3857) FROM "test_belarus"))
+  ).*
+) tile
+JOIN LATERAL (
+  SELECT "geom" AS geom
+  FROM "test_belarus"
+  ORDER BY "geom" <-> ST_Centroid(ST_Transform(tile.geom, 4326))
+  LIMIT 1
+) objects
+ON true
+--------------------
+mean: 25466.364 ms, median: 25466.364 ms
 
 kNN, k=100, zoom level 11, 4032 tiles, 1 times
-mean: 57993.034 ms, median: 57993.034 ms
+--------------------
+EXPLAIN (ANALYZE, FORMAT JSON)
+SELECT tile.i, tile.j, objects.geom
+FROM (
+  SELECT (
+    ST_SquareGrid(
+      19567.879241005077,
+      (SELECT ST_Transform(ST_SetSRID(ST_Extent("geom"), 4326), 3857) FROM "test_belarus"))
+  ).*
+) tile
+JOIN LATERAL (
+  SELECT "geom" AS geom
+  FROM "test_belarus"
+  ORDER BY "geom" <-> ST_Centroid(ST_Transform(tile.geom, 4326))
+  LIMIT 100
+) objects
+ON true
+--------------------
+mean: 57123.88 ms, median: 57123.88 ms
