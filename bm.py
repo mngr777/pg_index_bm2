@@ -13,6 +13,7 @@ GridSize=10
 gVerbose = False
 
 ColumnDefault = 'geom'
+ZoomDefault = 12
 TimesDefault = 10
 
 def vprint(*args, **kwargs):
@@ -49,30 +50,11 @@ def parse_args():
     parser.add_argument('--table', required=True, help='Table name')
     parser.add_argument('--column', default=ColumnDefault, help='Geometry column')
     parser.add_argument('--fillfactor', default=None, help='GiST index FILLFACTOR')
+    parser.add_argument('--zoom', default=12, help='Zoom level')
     parser.add_argument('--srid', type=int, default=0, help='Geometry SRID')
     parser.add_argument('--times', type=int, default=TimesDefault, help='# of times to run tests')
     parser.add_argument('--verbose', action='store_true', default=False, help='Print log messages')
     return parser.parse_args()
-
-def get_zoom_level(conn, args):
-    table_ident = Sql.Identifier(args.table)
-    column_ident = Sql.Identifier(args.column)
-    query = '''
-WITH
-  extent AS (SELECT ST_Transform(ST_SetSRID(ST_Extent({}), %s), 3857) AS geom FROM {}),
-  size AS (
-    SELECT GREATEST(
-      ST_XMax(extent.geom) - ST_XMin(extent.geom),
-      ST_YMax(extent.geom) - ST_YMin(extent.geom)
-    ) / %s AS value
-    FROM extent)
-SELECT ROUND(LOG(%s / size.value) / LOG(2.0)) AS zoom
-FROM size
-'''
-    cursor = conn.execute(
-        Sql.SQL(query).format(column_ident, table_ident),
-        (args.srid, GridSize, MercatorSize))
-    return cursor.fetchone()[0]
 
 # Create GiST index on column, return creation time (including latency) in ms
 def test_create_gist_index(conn, args):
@@ -127,7 +109,7 @@ def test_self_join(conn, args):
         time_ms_round(median(exec_times_ms))))
     print() # newline
 
-def test_tiling_request(conn, args, zoom):
+def test_tiling_request(conn, args):
     table_ident = Sql.Identifier(args.table)
     column_ident = Sql.Identifier(args.column)
     query = '''
@@ -147,21 +129,21 @@ ON true
 '''
     cursor = conn.execute(
         Sql.SQL(query).format(column_ident, table_ident, column_ident, table_ident, column_ident),
-        (MercatorSize / 2**zoom, args.srid, args.srid))
+        (MercatorSize / 2**args.zoom, args.srid, args.srid))
     return pg.get_exec_time_ms(cursor)
 
-def test_tiling(conn, args, zoom):
+def test_tiling(conn, args):
     # Create index
     index_name = get_index_name(args.table, args.column)
     drop_index(conn, index_name)
     create_gist_index(conn, args.table, index_name, args.column, args.fillfactor)
 
     # Run tiling request args.times times
-    print('Tiling, zoom level {}, {} times'.format(zoom, args.times))
+    print('Tiling, zoom level {}, {} times'.format(args.zoom, args.times))
     exec_times_ms = []
     for i in range(1, args.times + 1):
         vprint('  #{}'.format(i), end=' ')
-        time_ms = test_tiling_request(conn, args, zoom)
+        time_ms = test_tiling_request(conn, args)
         vprint('{} ms'.format(time_ms))
         exec_times_ms.append(time_ms)
     # Pring results
@@ -170,7 +152,7 @@ def test_tiling(conn, args, zoom):
         time_ms_round(median(exec_times_ms))))
     print() # newline
 
-def test_knn_request(conn, args, k, zoom):
+def test_knn_request(conn, args, k):
     table_ident = Sql.Identifier(args.table)
     column_ident = Sql.Identifier(args.column)
     query = '''
@@ -193,11 +175,11 @@ ON true
 '''
     cursor = conn.execute(
         Sql.SQL(query).format(column_ident, table_ident, column_ident, table_ident, column_ident),
-        (MercatorSize / 2**zoom, args.srid, args.srid, k))
+        (MercatorSize / 2**args.zoom, args.srid, args.srid, k))
     return pg.get_exec_time_ms(cursor)
 
 # Load points from args.knn_points file, run kNN args.times times for each point
-def test_knn(conn, args, k, zoom):
+def test_knn(conn, args, k):
     # Create index
     index_name = get_index_name(args.table, args.column)
     drop_index(conn, index_name)
@@ -208,7 +190,7 @@ def test_knn(conn, args, k, zoom):
     exec_times_ms = []
     for i in range(1, args.times + 1):
         vprint('  #{}'.format(i), end=' ')
-        time_ms = test_knn_request(conn, args, k, zoom)
+        time_ms = test_knn_request(conn, args, k)
         vprint('{} ms'.format(time_ms))
         exec_times_ms.append(time_ms)
 
@@ -239,9 +221,6 @@ def run(conn_data, args):
     init(conn, args)
     vprint() # newline
 
-    # Get zoom level for tiling/kNN tests
-    zoom = get_zoom_level(conn, args)
-
     ## Run tests
 
     # 1. GiST index creation time
@@ -251,11 +230,11 @@ def run(conn_data, args):
     test_self_join(conn, args)
 
     # 3. Tiling
-    test_tiling(conn, args, zoom)
+    test_tiling(conn, args)
 
     # 4. kNN request time, k in {1, 100}
-    test_knn(conn, args, 1, zoom)
-    test_knn(conn, args, 100, zoom)
+    test_knn(conn, args, 1)
+    test_knn(conn, args, 100)
 
     # Cleanup
     cleanup(conn, args)
