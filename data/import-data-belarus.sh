@@ -1,6 +1,6 @@
 #!/bin/bash
 
-. env.sh
+. pg_env.sh
 
 GF_DIR='geofabrik'
 BELARUS_PBF="belarus-latest.osm.pbf"

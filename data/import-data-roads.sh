@@ -1,6 +1,6 @@
 #!/bin/bash
 
-. env.sh
+. pg_env.sh
 
 FILE="roads_rdr_insert.sql"
 TABLE="roads_rdr"
