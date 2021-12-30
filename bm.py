@@ -8,6 +8,7 @@ import cfg
 import pg
 
 MercatorSize = 20037508.3427892 * 2
+GridSize=10
 
 gVerbose = False
 
@@ -88,14 +89,14 @@ WITH
     SELECT GREATEST(
       ST_XMax(extent.geom) - ST_XMin(extent.geom),
       ST_YMax(extent.geom) - ST_YMin(extent.geom)
-    ) / 10 AS value
+    ) / %s AS value
     FROM extent)
 SELECT ROUND(LOG(%s / size.value) / LOG(2.0)) AS zoom
 FROM size
 '''
     cursor = conn.execute(
         Sql.SQL(query).format(column_ident, table_ident),
-        (args.srid, MercatorSize))
+        (args.srid, GridSize, MercatorSize))
     return cursor.fetchone()[0]
 
 # Create GiST index on column, return creation time (including latency) in ms
@@ -228,7 +229,7 @@ def test_knn(conn, args, k, zoom):
     create_gist_index(conn, args.table, index_name, args.column, args.fillfactor)
 
     # Run kNN request args.times times
-    print('kNN, k={}, {} times per point'.format(k, args.times))
+    print('kNN, k={}, {} times'.format(k, args.times))
     exec_times_ms = []
     for i in range(1, args.times + 1):
         vprint('  #{}'.format(i), end=' ')
