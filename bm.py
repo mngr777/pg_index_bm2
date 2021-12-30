@@ -21,26 +21,6 @@ def vprint(*args, **kwargs):
 def time_ms_round(value):
     return round(value, 4)
 
-def create_table(conn, name, columns):
-    ident = Sql.Identifier(name)
-    query = 'CREATE TABLE IF NOT EXISTS {} (' + columns + ')'
-    conn.execute(Sql.SQL(query).format(ident))
-
-def table_exists(conn, name):
-    # TODO: check schema
-    query = 'SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name=%s)'
-    cursor = conn.execute(Sql.SQL(query), (name,))
-    return cursor.fetchone()[0]
-
-def table_is_empty(conn, name):
-    ident = Sql.Identifier(name)
-    cursor = conn.execute(Sql.SQL('SELECT COUNT(*) FROM {}').format(ident))
-    return cursor.fetchone()[0] == 0
-
-def drop_table(conn, name):
-    ident = Sql.Identifier(name)
-    conn.execute(Sql.SQL('DROP TABLE IF EXISTS {}').format(ident))
-
 def get_index_name(table, column):
     return '{}_{}_idx'.format(table, column)
 
@@ -66,15 +46,10 @@ def drop_index(conn, name):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', required=True, help='Config')
-    parser.add_argument('--data', help='Data file')
     parser.add_argument('--table', required=True, help='Table name')
     parser.add_argument('--column', default=ColumnDefault, help='Geometry column')
     parser.add_argument('--fillfactor', default=None, help='GiST index FILLFACTOR')
     parser.add_argument('--srid', type=int, default=0, help='Geometry SRID')
-    parser.add_argument('--drop-table-before', action='store_true', default=False, help='Drop table before data import')
-    parser.add_argument('--drop-table-after', action='store_true', default=False, help='Drop after running tests')
-    parser.add_argument('--create-table', action='store_true', default=False, help='Create table before data import')
-    parser.add_argument('--table-columns', help='Table columns (required with "--create-table" flag)')
     parser.add_argument('--times', type=int, default=TimesDefault, help='# of times to run tests')
     parser.add_argument('--verbose', action='store_true', default=False, help='Print log messages')
     return parser.parse_args()
@@ -244,34 +219,7 @@ def test_knn(conn, args, k, zoom):
     print() # newline
 
 def init(conn, args):
-    reconnect = False
-
-    # Drop table
-    if args.drop_table_before:
-        vprint('Dropping table "{}"'.format(args.table))
-        drop_table(conn, args.table)
-        reconnect = True
-
-    # Create table
-    if args.create_table:
-        vprint('Creating table "{}", columns: "{}"'.format(args.table, args.columns))
-        create_table(conn, args.table, args.columns)
-        reconnect = True
-
-    # Import test data
-    if args.data:
-        if not table_exists(conn, args.table) or table_is_empty(conn, args.table):
-            vprint('Importing data from "{}"'.format(args.data))
-            conn.run(args.data)
-            reconnect = True
-        else:
-            print('Table "{}" already exists and is not empty, data will not be imported'.format(args.table))
-            print() # newline
-
-    if reconnect:
-        # Reconnect
-        vprint('Reconnecting')
-        conn.reconnect()
+    pass
 
 def cleanup(conn, args):
     # Drop table
