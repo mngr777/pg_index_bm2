@@ -3,9 +3,9 @@
 # roads_rdr
 echo "# Roads around Vancouver"
 ./bm.py --config config.json \
-        --data "data/roads_rdr_insert.sql" \
         --table roads_rdr \
         --srid 3005 \
+        --zoom 14 \
         --times 10
 
 # OSM Belarus
@@ -14,5 +14,6 @@ echo "# OSM Belarus"
         --table "test_belarus" \
         --column "geom" \
         --srid 4326 \
+        --zoom 11 \
         --times 1
 

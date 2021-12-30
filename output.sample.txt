@@ -1,0 +1,57 @@
+# Roads around Vancouver
+Connection: "orig"
+
+CREATE GiST INDEX, 10 times
+mean: 254.6159 ms, median: 253.5225 ms
+
+gist_stat(roads_rdr_geom_idx):
+Number of levels:          3
+Number of pages:           715
+Number of leaf pages:      711
+Number of tuples:          186066
+Number of invalid tuples:  0
+Number of leaf tuples:     185352
+Total size of tuples:      5218428 bytes
+Total size of leaf tuples: 5198388 bytes
+Total size of index:       5857280 bytes
+
+Self-join, 10 times
+mean: 15239.0256 ms, median: 15035.5435 ms
+
+Tiling, zoom level 14, 2296 tiles, 10 times
+mean: 10173.678 ms, median: 10061.5725 ms
+
+kNN, k=1, zoom level 14, 2296 tiles, 10 times
+mean: 1337.7524 ms, median: 1337.449 ms
+
+kNN, k=100, zoom level 14, 2296 tiles, 10 times
+mean: 6983.5279 ms, median: 7199.777 ms
+
+# OSM Belarus
+Connection: "orig"
+
+CREATE GiST INDEX, 1 times
+mean: 13516.69 ms, median: 13516.69 ms
+
+gist_stat(test_belarus_geom_idx):
+Number of levels:          3
+Number of pages:           30978
+Number of leaf pages:      30858
+Number of tuples:          8084789
+Number of invalid tuples:  0
+Number of leaf tuples:     8053812
+Total size of tuples:      226745828 bytes
+Total size of leaf tuples: 225877032 bytes
+Total size of index:       253771776 bytes
+
+Self-join, 1 times
+mean: 2308334.542 ms, median: 2308334.542 ms
+
+Tiling, zoom level 11, 4032 tiles, 1 times
+mean: 121905.012 ms, median: 121905.012 ms
+
+kNN, k=1, zoom level 11, 4032 tiles, 1 times
+mean: 25933.088 ms, median: 25933.088 ms
+
+kNN, k=100, zoom level 11, 4032 tiles, 1 times
+mean: 57993.034 ms, median: 57993.034 ms

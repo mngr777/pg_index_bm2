@@ -50,11 +50,28 @@ def parse_args():
     parser.add_argument('--table', required=True, help='Table name')
     parser.add_argument('--column', default=ColumnDefault, help='Geometry column')
     parser.add_argument('--fillfactor', default=None, help='GiST index FILLFACTOR')
-    parser.add_argument('--zoom', default=12, help='Zoom level')
+    parser.add_argument('--zoom', type=int, default=ZoomDefault, help='Zoom level')
     parser.add_argument('--srid', type=int, default=0, help='Geometry SRID')
     parser.add_argument('--times', type=int, default=TimesDefault, help='# of times to run tests')
     parser.add_argument('--verbose', action='store_true', default=False, help='Print log messages')
     return parser.parse_args()
+
+def get_tile_num(conn, args):
+    table_ident = Sql.Identifier(args.table)
+    column_ident = Sql.Identifier(args.column)
+    query = '''
+SELECT COUNT(*) FROM (
+  SELECT (
+    ST_SquareGrid(
+      %s,
+      (SELECT ST_Transform(ST_SetSRID(ST_Extent({}), %s), 3857) FROM {}))
+  ).*
+) tiles
+'''
+    cursor = conn.execute(
+        Sql.SQL(query).format(column_ident, table_ident),
+        (MercatorSize / 2**args.zoom, args.srid))
+    return cursor.fetchone()[0]
 
 # Create GiST index on column, return creation time (including latency) in ms
 def test_create_gist_index(conn, args):
@@ -132,14 +149,14 @@ ON true
         (MercatorSize / 2**args.zoom, args.srid, args.srid))
     return pg.get_exec_time_ms(cursor)
 
-def test_tiling(conn, args):
+def test_tiling(conn, args, tile_num):
     # Create index
     index_name = get_index_name(args.table, args.column)
     drop_index(conn, index_name)
     create_gist_index(conn, args.table, index_name, args.column, args.fillfactor)
 
     # Run tiling request args.times times
-    print('Tiling, zoom level {}, {} times'.format(args.zoom, args.times))
+    print('Tiling, zoom level {}, {} tiles, {} times'.format(args.zoom, tile_num, args.times))
     exec_times_ms = []
     for i in range(1, args.times + 1):
         vprint('  #{}'.format(i), end=' ')
@@ -179,14 +196,14 @@ ON true
     return pg.get_exec_time_ms(cursor)
 
 # Load points from args.knn_points file, run kNN args.times times for each point
-def test_knn(conn, args, k):
+def test_knn(conn, args, k, tile_num):
     # Create index
     index_name = get_index_name(args.table, args.column)
     drop_index(conn, index_name)
     create_gist_index(conn, args.table, index_name, args.column, args.fillfactor)
 
     # Run kNN request args.times times
-    print('kNN, k={}, {} times'.format(k, args.times))
+    print('kNN, k={}, zoom level {}, {} tiles, {} times'.format(k, args.zoom, tile_num, args.times))
     exec_times_ms = []
     for i in range(1, args.times + 1):
         vprint('  #{}'.format(i), end=' ')
@@ -200,15 +217,6 @@ def test_knn(conn, args, k):
         time_ms_round(median(exec_times_ms))))
     print() # newline
 
-def init(conn, args):
-    pass
-
-def cleanup(conn, args):
-    # Drop table
-    if args.drop_table_after:
-        vprint('Dropping table "{}"'.format(args.table))
-        drop_table(conn, args.table)
-
 def run(conn_data, args):
     print('Connection: "{}"'.format(conn_data['name']))
     print() # newline
@@ -216,10 +224,6 @@ def run(conn_data, args):
     # Connect
     vprint('Connecting to "{}"'.format(conn_data['name']))
     conn = pg.Connection(conn_data['params'], conn_data['name'])
-
-    # Init
-    init(conn, args)
-    vprint() # newline
 
     ## Run tests
 
@@ -229,15 +233,15 @@ def run(conn_data, args):
     # 2. Self-join
     test_self_join(conn, args)
 
+    # Calc. number of tiles for tiling/knn
+    tile_num = get_tile_num(conn, args)
+
     # 3. Tiling
-    test_tiling(conn, args)
+    test_tiling(conn, args, tile_num)
 
     # 4. kNN request time, k in {1, 100}
-    test_knn(conn, args, 1)
-    test_knn(conn, args, 100)
-
-    # Cleanup
-    cleanup(conn, args)
+    test_knn(conn, args, 1, tile_num)
+    test_knn(conn, args, 100, tile_num)
 
 def main():
     global gVerbose
