@@ -6,7 +6,8 @@ echo "# Roads around Vancouver"
         --table roads_rdr \
         --srid 3005 \
         --zoom 14 \
-        --times 10
+        --times 10 \
+        --out-json -
 
 # OSM Belarus
 echo "# OSM Belarus"
@@ -15,5 +16,5 @@ echo "# OSM Belarus"
         --column "geom" \
         --srid 4326 \
         --zoom 11 \
-        --times 1
-
+        --times 3 \
+        --out-json -

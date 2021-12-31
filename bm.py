@@ -2,10 +2,13 @@
 
 import argparse
 import datetime
+import json
+from pathlib import Path
 from statistics import mean, median
 from psycopg2 import sql as Sql
 import cfg
 import pg
+import re
 
 MercatorSize = 20037508.3427892 * 2
 GridSize=10
@@ -33,6 +36,33 @@ def print_query(cursor):
     print(bytes_to_str(cursor.query))
     print('--------------------')
 
+def parse_gist_stats(stats):
+    lines = stats.split('\n')
+    pairs = [
+        parse_gist_stats_line(line)
+        for line in filter(lambda l: l, map(str.strip, lines))
+    ]
+    data = {}
+    for pair in pairs:
+        data[pair['key']] = pair['value']
+    return data
+
+def parse_gist_stats_line(line):
+    parts = re.split(':\s+', line)
+    return {'key': parts[0], 'value': parts[1]}
+
+def output_json(path, data):
+    s = json.dumps(data, indent=4)
+    if path == '-':
+        print(s)
+    else:
+        file_output(path, s)
+
+def file_output(path, data):
+    # TODO: overwrite confirmation
+    with open(path, 'w') as fd:
+        fd.write(data)
+
 def create_gist_index(conn, table, index, column, fillfactor=None):
     table_ident = Sql.Identifier(table)
     index_ident = Sql.Identifier(index)
@@ -58,6 +88,7 @@ def parse_args():
     parser.add_argument('--table', required=True, help='Table name')
     parser.add_argument('--column', default=ColumnDefault, help='Geometry column')
     parser.add_argument('--fillfactor', default=None, help='GiST index FILLFACTOR')
+    parser.add_argument('--out-json', help='Output JSON file')
     parser.add_argument('--zoom', type=int, default=ZoomDefault, help='Zoom level')
     parser.add_argument('--srid', type=int, default=0, help='Geometry SRID')
     parser.add_argument('--times', type=int, default=TimesDefault, help='# of times to run tests')
@@ -80,7 +111,7 @@ def get_tile_num(conn, args):
     return cursor.fetchone()[0]
 
 # Create GiST index on column, return creation time (including latency) in ms
-def test_create_gist_index(conn, args):
+def test_create_gist_index(conn, args, data):
     fillfactor_text = ' FILLFACTOR {}'.format(args.fillfactor) if args.fillfactor is not None else ''
     print('CREATE GiST INDEX{}, {} times'.format(fillfactor_text, args.times))
     index_name = get_index_name(args.table, args.column)
@@ -99,14 +130,21 @@ def test_create_gist_index(conn, args):
         vprint('  #{} {} ms'.format(i, time_ms_round(time_ms)))
         # Store result
         create_times_ms.append(time_ms)
+
     # Print results
-    print('mean: {} ms, median: {} ms'.format(
-        time_ms_round(mean(create_times_ms)),
-        time_ms_round(median(create_times_ms))))
+    test_data = {
+        'mean': time_ms_round(mean(create_times_ms)),
+        'median': time_ms_round(median(create_times_ms))
+    }
+    data['create_index_ms'] = test_data
+    print('mean: {} ms, median: {} ms'.format(test_data['mean'], test_data['median']))
     print() # newline
+
     # Print gist_stat result
     print('gist_stat({}):'.format(index_name))
-    print(gist_index_stat(conn, index_name))
+    gist_stats = gist_index_stat(conn, index_name)
+    data['gist_stats'] = parse_gist_stats(gist_stats)
+    print(gist_stats)
 
 def test_self_join_request(conn, args):
     table_ident = Sql.Identifier(args.table)
@@ -114,7 +152,7 @@ def test_self_join_request(conn, args):
     query = 'EXPLAIN (ANALYZE, FORMAT JSON) SELECT COUNT(*) FROM {} a, {} b WHERE a.{} && b.{}'
     return conn.execute(Sql.SQL(query).format(table_ident, table_ident, column_ident, column_ident))
 
-def test_self_join(conn, args):
+def test_self_join(conn, args, data):
     # Create index
     index_name = get_index_name(args.table, args.column)
     drop_index(conn, index_name)
@@ -136,9 +174,12 @@ def test_self_join(conn, args):
         exec_times_ms.append(time_ms)
 
     # Print results
-    print('mean: {} ms, median: {} ms'.format(
-        time_ms_round(mean(exec_times_ms)),
-        time_ms_round(median(exec_times_ms))))
+    test_data = {
+        'mean': time_ms_round(mean(exec_times_ms)),
+        'median': time_ms_round(median(exec_times_ms))
+    }
+    data['self_join_ms'] = test_data
+    print('mean: {} ms, median: {} ms'.format(test_data['mean'], test_data['median']))
     print() # newline
 
 def test_tiling_request(conn, args):
@@ -161,7 +202,7 @@ ON true'''
         Sql.SQL(query).format(column_ident, table_ident, column_ident, table_ident, column_ident),
         (MercatorSize / 2**args.zoom, args.srid, args.srid))
 
-def test_tiling(conn, args, tile_num):
+def test_tiling(conn, args, data, tile_num):
     # Create index
     index_name = get_index_name(args.table, args.column)
     drop_index(conn, index_name)
@@ -181,10 +222,14 @@ def test_tiling(conn, args, tile_num):
         vprint('  #{} {} ms'.format(i, time_ms))
         # Store result
         exec_times_ms.append(time_ms)
-    # Pring results
-    print('mean: {} ms, median: {} ms'.format(
-        time_ms_round(mean(exec_times_ms)),
-        time_ms_round(median(exec_times_ms))))
+
+    # Print results
+    test_data = {
+        'mean': time_ms_round(mean(exec_times_ms)),
+        'median': time_ms_round(median(exec_times_ms))
+    }
+    data['tiling_ms'] = test_data
+    print('mean: {} ms, median: {} ms'.format(test_data['mean'], test_data['median']))
     print() # newline
 
 def test_knn_request(conn, args, k):
@@ -211,7 +256,7 @@ ON true'''
         (MercatorSize / 2**args.zoom, args.srid, args.srid, k))
 
 # Load points from args.knn_points file, run kNN args.times times for each point
-def test_knn(conn, args, k, tile_num):
+def test_knn(conn, args, data, k, tile_num):
     # Create index
     index_name = get_index_name(args.table, args.column)
     drop_index(conn, index_name)
@@ -233,9 +278,12 @@ def test_knn(conn, args, k, tile_num):
         exec_times_ms.append(time_ms)
 
     # Print results
-    print('mean: {} ms, median: {} ms'.format(
-        time_ms_round(mean(exec_times_ms)),
-        time_ms_round(median(exec_times_ms))))
+    test_data = {
+        'mean': time_ms_round(mean(exec_times_ms)),
+        'median': time_ms_round(median(exec_times_ms))
+    }
+    data['knn_{}_ms'.format(k)] = test_data
+    print('mean: {} ms, median: {} ms'.format(test_data['mean'], test_data['median']))
     print() # newline
 
 def run(conn_data, args):
@@ -247,21 +295,28 @@ def run(conn_data, args):
 
     ## Run tests
 
+    data = {}
+
     # 1. GiST index creation time
-    test_create_gist_index(conn, args)
+    test_create_gist_index(conn, args, data)
 
     # 2. Self-join
-    test_self_join(conn, args)
+    # test_self_join(conn, args)
 
     # Calc. number of tiles for tiling/knn
     tile_num = get_tile_num(conn, args)
+    data['tile_num'] = tile_num
 
     # 3. Tiling
-    test_tiling(conn, args, tile_num)
+    test_tiling(conn, args, data, tile_num)
 
     # 4. kNN request time, k in {1, 100}
-    test_knn(conn, args, 1, tile_num)
-    test_knn(conn, args, 100, tile_num)
+    test_knn(conn, args, data, 1, tile_num)
+    test_knn(conn, args, data, 100, tile_num)
+
+    # Output JSON
+    if args.out_json:
+        output_json(args.out_json, data)
 
 def main():
     global gVerbose
