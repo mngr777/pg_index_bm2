@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 
 NoValue = '<no-value>'
 
@@ -70,6 +71,21 @@ def print_gist_stats(data, labels):
         for fdata in data:
             out(' {} |'.format(get_value(fdata, 'gist_stats/'+field, NoValue)))
         nl()
+    # Effective fill
+    out('| Effective fill |')
+    for fdata in data:
+        tuple_size = get_value(fdata, 'gist_stats/Total size of tuples')
+        index_size = get_value(fdata, 'gist_stats/Total size of index')
+        if (tuple_size is not None) and index_size:
+            out(' {} |'.format(round(size_to_int(tuple_size) / size_to_int(index_size), 4)))
+        else:
+            out(' N/A |')
+    nl()
+
+def size_to_int(value):
+    match = re.match('(\d+)\s+bytes', value)
+    size = match[1] if (match) else value;
+    return int(size)
 
 def print_tests(data, labels):
     # Header
