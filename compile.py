@@ -21,7 +21,7 @@ GistStatFields = [
 
 Tests = [
     {'name': 'Create index', 'key': 'create_index_ms'},
-    {'name': 'Self-join', 'key': 'self_join'},
+    {'name': 'Self-join', 'key': 'self_join_ms'},
     {'name': 'Tiling', 'key': 'tiling_ms'},
     {'name': 'kNN k=1', 'key': 'knn_1_ms'},
     {'name': 'kNN k=100', 'key': 'knn_100_ms'},
