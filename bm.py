@@ -19,6 +19,8 @@ ColumnDefault = 'geom'
 ZoomDefault = 12
 TimesDefault = 10
 
+TestKeys = ['create', 'selfjoin', 'tiling', 'knn']
+
 def vprint(*args, **kwargs):
     if (gVerbose): print(*args, **kwargs)
 
@@ -92,6 +94,7 @@ def parse_args():
     parser.add_argument('--zoom', type=int, default=ZoomDefault, help='Zoom level')
     parser.add_argument('--srid', type=int, default=0, help='Geometry SRID')
     parser.add_argument('--times', type=int, default=TimesDefault, help='# of times to run tests')
+    parser.add_argument('--skip', nargs='+', choices=TestKeys, help='List of tests to skip')
     parser.add_argument('--verbose', action='store_true', default=False, help='Print log messages')
     return parser.parse_args()
 
@@ -296,23 +299,29 @@ def run(conn_data, args):
     ## Run tests
 
     data = {}
+    def is_skipped(key):
+        return args.skip and key in args.skip
 
     # 1. GiST index creation time
-    test_create_gist_index(conn, args, data)
+    if not is_skipped('create'):
+        test_create_gist_index(conn, args, data)
 
     # 2. Self-join
-    # test_self_join(conn, args)
+    if not is_skipped('selfjoin'):
+        test_self_join(conn, args, data)
 
     # Calc. number of tiles for tiling/knn
     tile_num = get_tile_num(conn, args)
     data['tile_num'] = tile_num
 
     # 3. Tiling
-    test_tiling(conn, args, data, tile_num)
+    if not is_skipped('tiling'):
+        test_tiling(conn, args, data, tile_num)
 
     # 4. kNN request time, k in {1, 100}
-    test_knn(conn, args, data, 1, tile_num)
-    test_knn(conn, args, data, 100, tile_num)
+    if not is_skipped('knn'):
+        test_knn(conn, args, data, 1, tile_num)
+        test_knn(conn, args, data, 100, tile_num)
 
     # Output JSON
     if args.out_json:
